@@ -1,0 +1,20 @@
+{
+  "name": "retinopexy-bubble-simulator",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Free, browser-based educational pneumatic retinopexy simulator.",
+  "license": "MIT",
+  "engines": { "node": "24.x" },
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "three": "^0.179.1"
+  },
+  "devDependencies": {
+    "vite": "^7.1.2"
+  }
+}
