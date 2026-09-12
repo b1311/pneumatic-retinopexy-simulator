@@ -6,7 +6,7 @@ const state={fill:35,gas:'SF6',concentration:30,elapsedDays:0,laterality:'Right'
 // Population-level absorption defaults; visual disappearance is defined as 1% fill.
 const gases={
  Air:{density:1.2,defaultConcentration:0,halfLives:[[0,1.3]]},
- SF6:{density:6.2,defaultConcentration:30,halfLives:[[0,1.3],[18,2.2],[20,2.3],[25,2.55],[30,2.8],[100,2.8]],pure:{factor:2,peakDay:1}},
+ SF6:{density:6.2,defaultConcentration:30,halfLives:[[0,2.6],[18,4.4],[20,4.6],[25,5.1],[30,5.6],[100,5.6]],pure:{factor:2,peakDay:1}},
  C3F8:{density:8.2,defaultConcentration:15,halfLives:[[0,1.3],[5,4.2],[10,6.5],[15,8],[20,12.5],[100,8]],pure:{factor:4,peakDay:3.5}}
 };
 const disappearanceFill=1;
