@@ -1,33 +1,32 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import './style.css';
+import { solveBubble, flatCapLevel, arcDegrees, makeKinetics, gasOption, gasDensity, GASES, REFERENCE_FILL, DISAPPEARANCE_FILL } from './physics.js';
 
-const state={fill:35,gas:'SF6',concentration:30,elapsedDays:0,laterality:'Right',posture:0,tilt:0,iop:15,sigma:0.052,contact:38,bubbleOpacity:.72,opacity:.22,tearEnabled:false,tearClock:12,tearAnterior:45,tears:[{clock:12,anterior:45}],activeTear:0,labels:true,vessels:true,section:false};
-// Population-level absorption defaults; visual disappearance is defined as 1% fill.
-const gases={
- Air:{density:1.2,defaultConcentration:0,halfLives:[[0,1.3]]},
- SF6:{density:6.2,defaultConcentration:30,halfLives:[[0,2.6],[18,4.4],[20,4.6],[25,5.1],[30,5.6],[100,5.6]],pure:{factor:2,peakDay:1}},
- C3F8:{density:8.2,defaultConcentration:15,halfLives:[[0,1.3],[5,4.2],[10,6.5],[15,8],[20,12.5],[100,8]],pure:{factor:4,peakDay:3.5}}
-};
-const disappearanceFill=1;
+const state={fill:35,gas:'SF6',concentration:30,lens:'Phakic',durationDays:18,elapsedDays:0,laterality:'Right',posture:0,tilt:0,iop:15,sigma:0.060,contact:39,bubbleOpacity:.72,opacity:.22,tearEnabled:false,tearClock:12,tearAnterior:45,tears:[{clock:12,anterior:45}],activeTear:0,labels:true,vessels:true,section:false};
+// Gas data, sources and kinetics live in physics.js. Visual disappearance is 1% of the cavity.
+const disappearanceFill=DISAPPEARANCE_FILL*100;
+const cavityRadius=10.55,cavityVolume=4/3*Math.PI*cavityRadius**3;
 document.querySelector('#app').innerHTML=`<div class="shell"><aside class="panel">
   <div class="brand"><span class="brand-mark">◉</span> Ophthalmic physics lab</div><h1>Pneumatic retinopexy simulator</h1><p class="lede">Explore how gas volume, posture and interfacial forces determine retinal tamponade.</p>
   <div class="section"><div class="section-title">Gas & volume <span>01</span></div>
     ${slider('fill','Current gas fill','%',0,100,1)}
-    <div class="field"><div class="field-head"><span>Gas agent</span></div><select id="gas"><option>Air</option><option selected>SF6</option><option>C3F8</option></select></div>
+    <div class="field"><div class="field-head"><span>Gas agent</span></div><select id="gas"><option>Air</option><option selected>SF6</option><option>C2F6</option><option>C3F8</option></select></div>
     <div class="field" id="concentrationField"><div class="field-head"><span>Gas concentration</span><span class="value" id="concentrationVal">30%</span></div><select id="concentration"></select></div>
+    <div class="field"><div class="field-head"><span>Lens status</span></div><select id="lens"><option selected>Phakic</option><option>Pseudophakic</option><option>Aphakic</option></select></div>
     <div class="field"><div class="field-head"><span>Eye</span></div><select id="laterality"><option selected>Right</option><option>Left</option></select></div>
   </div>
   <div class="section kinetics"><div class="section-title">Gas kinetics <span>02</span></div>
-    ${slider('elapsedDays','Time from now','days',0,60,.5)}
-    <div class="kinetics-grid"><div><span>Estimated fill</span><strong id="predictedFill">--</strong></div><div><span>Half-life</span><strong id="halfLife">--</strong></div><div><span>Remaining</span><strong id="remainingTime">--</strong></div><div><span>Phase</span><strong id="kineticsPhase">--</strong></div></div>
-    <div class="expansion-warning" id="expansionWarning" hidden></div>
+    ${slider('elapsedDays','Time from now','days',0,90,.5)}
+    ${slider('durationDays','Duration of a 90% fill','days',3,100,.5)}<p class="model-note" id="durationSource"></p>
+    <div class="kinetics-grid"><div><span>Estimated fill</span><strong id="predictedFill">--</strong></div><div><span>First halving (model)</span><strong id="halfLife">--</strong></div><div><span>Remaining</span><strong id="remainingTime">--</strong></div><div><span>Phase</span><strong id="kineticsPhase">--</strong></div></div>
+    <p class="model-note evidence" id="publishedHalfLife"></p><div class="expansion-warning" id="expansionWarning" hidden></div>
     <button class="timeline-reset" id="timelineReset" type="button">Return to now</button>
-    <p class="model-note">Diluted gas uses absorption-phase decay. Pure gas expands smoothly to its estimated peak, then decays exponentially. Visual disappearance is ${disappearanceFill}% fill.</p>
+    <p class="model-note">Gas is absorbed through the retina it touches, so the rate scales with contact area: large bubbles shrink slowly and small ones quickly, and no single half-life fits a bubble's whole life. The rate is set so a 90% fill clears (below ${disappearanceFill}% of the cavity) at the duration above. Pure gas first expands to its published peak.</p>
   </div>
   <div class="section"><div class="section-title">Patient orientation <span>03</span></div>
     ${slider('posture','Pitch','°',-90,90,1)}${slider('tilt','Roll','°',-90,90,1)}
-    <div class="field"><div class="field-head"><span>Preset</span></div><select id="preset"><option value="0,0">Upright</option><option value="90,0">Face down</option><option value="0,-90">Left side</option><option value="0,90">Right side</option></select></div>
+    <div class="field"><div class="field-head"><span>Preset</span></div><select id="preset"><option value="0,0">Upright</option><option value="90,0">Face down</option><option value="0,-90">Left side down</option><option value="0,90">Right side down</option></select></div>
   </div>
   <div class="section"><div class="section-title">Interface physics <span>04</span></div>
     ${slider('iop','Intraocular pressure','mmHg',5,40,1)}${slider('sigma','Surface tension','mN/m',30,75,1,1000)}${slider('contact','Contact angle','°',15,80,1)}${slider('bubbleOpacity','Bubble opacity','%',10,100,1,100)}
@@ -39,8 +38,8 @@ document.querySelector('#app').innerHTML=`<div class="shell"><aside class="panel
     ${toggle('tearEnabled','Show retinal breaks',false)}<div class="tear-toolbar"><button id="addTear" type="button">+ Add break</button><button id="removeTear" type="button">Remove</button></div><div id="tearList" class="tear-list"></div>${slider('tearClock','Selected clock hour','h',1,12,.5)}${slider('tearAnterior','Anterior position','%',0,100,1)}
     <p class="disclaimer">Posterior = 0%; anterior near the ora = 100%. Educational visualization—not a treatment planner or medical device.</p>
   </div>
- </aside><main class="viewport"><div class="topbar"><div class="status"><span class="pill"><b>● LIVE</b></span><span class="pill">Numerical capillary equilibrium</span><span class="pill">Scale 1 unit = 1 mm</span><span class="pill" id="orient">Gravity: inferior</span></div><div class="view-controls"><button class="icon-btn fundus-btn" id="fundus" title="Toggle 2.5D fundus view">◉</button><button class="icon-btn" id="reset" title="Reset view">↺</button><button class="icon-btn" id="pause" title="Pause">Ⅱ</button></div></div><div id="scene"></div>
- <div class="readout" id="readout"><div class="read-head"><div class="read-title">Physics readout</div><button type="button" id="toggleReadout" aria-label="Minimize physics readout" aria-expanded="true">−</button></div><div class="read-body"><div class="metric key-metric"><span>Apex tamponade</span><strong id="apexLoad">—</strong></div><div class="metric key-metric"><span>Foveal tamponade</span><strong id="fovealLoad">—</strong></div><div class="metric"><span>Bubble volume</span><strong id="vol">—</strong></div><div class="metric"><span>IOP</span><strong id="iopReadout">—</strong></div><div class="metric"><span>Laplace increment</span><strong id="laplace">—</strong></div><div class="metric"><span>Bubble pressure</span><strong id="gasPressure">—</strong></div><div class="metric"><span>Bond number</span><strong id="bond">—</strong></div><div class="metric"><span>Retinal contact</span><strong id="contactArea">—</strong></div><div class="bar"><i id="coverage"></i></div></div></div><div class="hint">Drag to orbit · Scroll to zoom · Right-drag to pan</div></main></div>`;
+ </aside><main class="viewport"><div class="topbar"><div class="status"><span class="pill"><b>● LIVE</b></span><span class="pill">Young–Laplace equilibrium</span><span class="pill">Scale 1 unit = 1 mm</span><span class="pill" id="orient">Gravity: inferior</span></div><div class="view-controls"><button class="icon-btn fundus-btn" id="fundus" title="Toggle 2.5D fundus view">◉</button><button class="icon-btn" id="reset" title="Reset view">↺</button><button class="icon-btn" id="pause" title="Pause">Ⅱ</button></div></div><div id="scene"></div>
+ <div class="readout" id="readout"><div class="read-head"><div class="read-title">Physics readout</div><button type="button" id="toggleReadout" aria-label="Minimize physics readout" aria-expanded="true">−</button></div><div class="read-body"><div class="metric key-metric"><span>Apex tamponade</span><strong id="apexLoad">—</strong></div><div class="metric key-metric"><span>Foveal tamponade</span><strong id="fovealLoad">—</strong></div><div class="metric"><span>Bubble volume</span><strong id="vol">—</strong></div><div class="metric"><span>IOP</span><strong id="iopReadout">—</strong></div><div class="metric"><span>Laplace increment</span><strong id="laplace">—</strong></div><div class="metric"><span>Bubble pressure</span><strong id="gasPressure">—</strong></div><div class="metric"><span>Bond number</span><strong id="bond">—</strong></div><div class="metric"><span>Arc of contact</span><strong id="arc">—</strong></div><div class="metric"><span>Arc, flat-cap convention</span><strong id="arcFlat">—</strong></div><div class="metric"><span>Retinal contact</span><strong id="contactArea">—</strong></div><div class="bar"><i id="coverage"></i></div></div></div><div class="hint">Drag to orbit · Scroll to zoom · Right-drag to pan</div></main></div>`;
 
 function slider(id,label,unit,min,max,step,scale=1){return `<div class="field"><div class="field-head"><span id="${id}Label">${label}</span><span class="value" id="${id}Val">${Math.round(state[id]*scale)} ${unit}</span></div><input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${state[id]*scale}" data-scale="${scale}" data-unit="${unit}"></div>`}
 function toggle(id,label,on){return `<div class="toggle-row"><span>${label}</span><span class="toggle ${on?'on':''}" id="${id}"></span></div>`}
@@ -110,76 +109,81 @@ function makeLabel(textValue,x,y,z){const c=document.createElement('canvas');c.w
 
 let targetUp=new THREE.Vector3(0,1,0),bubbleUp=targetUp.clone(),velocity=new THREE.Vector3(),paused=false,fundusView=false,last=performance.now();
 let gasShapeKey='',gasShape={level:0,ring:0,sag:0};
-function activeHalfLife(){
- const points=gases[state.gas].halfLives,x=state.concentration;if(points.length===1)return points[0][1];
- for(let i=1;i<points.length;i++){if(x<=points[i][0]){const [x0,y0]=points[i-1],[x1,y1]=points[i],p=(x-x0)/(x1-x0);return y0+(y1-y0)*p}}
- return points.at(-1)[1];
+let kineticsKey='',kinetics=null;
+function currentKinetics(){
+ const key=[state.gas,state.concentration,state.fill,state.lens,state.durationDays].join('/');
+ if(key!==kineticsKey){kineticsKey=key;kinetics=makeKinetics({gas:state.gas,concentration:state.concentration,fill:state.fill,lens:state.lens,durationDays:state.durationDays,R:cavityRadius})}
+ return kinetics;
 }
-function isPureGas(){return state.concentration===100&&Boolean(gases[state.gas].pure)}
-function rawEstimatedFill(){
- const kinetics=gases[state.gas].pure,t=state.elapsedDays;
- if(!isPureGas())return state.fill*Math.pow(.5,t/activeHalfLife());
- if(t<kinetics.peakDay){const x=t/kinetics.peakDay,smooth=x*x*(3-2*x);return state.fill*(1+(kinetics.factor-1)*smooth)}
- return state.fill*kinetics.factor*Math.pow(.5,(t-kinetics.peakDay)/activeHalfLife());
-}
-function estimatedFill(){return Math.min(100,rawEstimatedFill())}
-function disappearanceDay(){
- if(state.fill<=disappearanceFill)return 0;
- if(!isPureGas())return activeHalfLife()*Math.log2(state.fill/disappearanceFill);
- const kinetics=gases[state.gas].pure;return kinetics.peakDay+activeHalfLife()*Math.log2(state.fill*kinetics.factor/disappearanceFill);
-}
+function isPureGas(){return Boolean(gasOption(state.gas,state.concentration).pure)}
+function rawEstimatedFill(){return currentKinetics().rawFillAt(state.elapsedDays)}
+function estimatedFill(){return Math.min(100,currentKinetics().fillAt(state.elapsedDays))}
+function disappearanceDay(){return currentKinetics().disappearanceDay}
+function setText(id,text){const el=document.getElementById(id);if(el&&el.textContent!==text)el.textContent=text}
 function updateKineticsReadout(fill){
- const rawFill=rawEstimatedFill(),remaining=Math.max(0,disappearanceDay()-state.elapsedDays),pure=isPureGas(),kinetics=gases[state.gas].pure;
- document.querySelector('#predictedFill').textContent=rawFill<.05?'<0.1%':fill.toFixed(1)+'%';
- document.querySelector('#halfLife').textContent=activeHalfLife().toFixed(1)+' days';
- document.querySelector('#remainingTime').textContent=remaining<=0?'Below threshold':'~'+remaining.toFixed(1)+' days';
- document.querySelector('#kineticsPhase').textContent=pure?(state.elapsedDays<kinetics.peakDay?'Expansion':'Absorption'):'Absorption';
- const warning=document.querySelector('#expansionWarning');warning.hidden=rawFill<=100;warning.textContent=rawFill>100?'Unconstrained expansion: '+rawFill.toFixed(0)+'% fill. Model capped at cavity volume; clinically this implies pressure risk.':'';
- document.querySelector('#vol').textContent=(4/3*Math.PI*Math.pow(10.55,3)*fill/100/1000).toFixed(2)+' mL ('+fill.toFixed(1)+'%)';
+ const k=currentKinetics(),rawFill=rawEstimatedFill(),remaining=Math.max(0,k.disappearanceDay-state.elapsedDays),opt=k.option;
+ setText('predictedFill',fill<=0?'Gone (<1%)':fill.toFixed(1)+'%');
+ // First halving from the start of absorption; once time has passed, the halving time from the current fill.
+ const halving=state.elapsedDays>k.peakDay&&fill>0?k.halvingFrom(fill/100):k.firstHalving;
+ setText('halfLife',halving.toFixed(1)+' days');
+ setText('remainingTime',remaining<=0?'Below threshold':'~'+remaining.toFixed(1)+' days');
+ setText('kineticsPhase',k.phaseAt(state.elapsedDays));
+ setText('durationSource','Default: '+opt.durationSource+'.');
+ setText('publishedHalfLife','Published half-life: '+opt.publishedHalfLife+'. Single-exponential fits do not capture the slower early and faster late phases.');
+ const warning=document.getElementById('expansionWarning'),over=rawFill>100;warning.hidden=!over;setText('expansionWarning',over?'Unconstrained expansion: '+rawFill.toFixed(0)+'% fill. Model capped at cavity volume; clinically this implies pressure risk.':'');
+ setText('vol',(cavityVolume*fill/100/1000).toFixed(2)+' mL ('+fill.toFixed(1)+'%)');
+ setText('fillVal',state.fill+' % · '+(cavityVolume*state.fill/100/1000).toFixed(2)+' mL');
 }
-function updateGasRegion(V,R,fill){
- const key=[fill.toFixed(4),R].join('/');if(key===gasShapeKey)return gasShape;gasShapeKey=key;if(fill<=0){gasRegion.visible=false;return gasShape={level:R,ring:0,center:R,radius:0}}gasRegion.visible=true;
- const f=fill/100,rb=R*Math.cbrt(f),progress=Math.max(0,(f-.05)/(.80-.05)),curvature=.98*Math.exp(-7*Math.pow(progress,3))/Math.max(rb,1e-6),Rc=Math.min(1/curvature,1000*R);
- function intersection(c){const level=(R*R-Rc*Rc+c*c)/(2*c),ring=Math.sqrt(Math.max(0,R*R-level*level));return{level,ring}}
- function boundary(c,segments=96){const {level,ring}=intersection(c),wallAngle=Math.acos(THREE.MathUtils.clamp(level/R,-1,1)),theta=Math.atan2(level-c,ring),pts=[];for(let i=0;i<=segments;i++){const a=wallAngle*i/segments;pts.push(new THREE.Vector2(R*Math.sin(a),R*Math.cos(a)))}for(let i=1;i<=segments;i++){const a=theta+(-Math.PI/2-theta)*i/segments;pts.push(new THREE.Vector2(Math.max(0,Rc*Math.cos(a)),c+Rc*Math.sin(a)))}return{pts,level,ring}}
- function enclosedVolume(c){const pts=boundary(c,72).pts;let integral=0;for(let i=0;i<pts.length-1;i++){const a=pts[i],b=pts[i+1];integral+=(b.y-a.y)*(a.x*a.x+a.x*b.x+b.x*b.x)/3}return Math.abs(Math.PI*integral)}
- // Curvature fixes the interface shape. Only its axial center is varied to meet volume.
- let lo=Math.abs(Rc-R)+1e-7,hi=Rc+R-1e-7;for(let i=0;i<58;i++){const c=(lo+hi)/2;if(enclosedVolume(c)>V)lo=c;else hi=c}const center=(lo+hi)/2,{pts,level,ring}=boundary(center,128),old=gasRegion.geometry;gasRegion.geometry=new THREE.LatheGeometry(pts,128);old.dispose();return gasShape={level,ring,center,radius:Rc};
+function updateGasRegion(V,R,fill,deltaRho){
+ // Round the fill so scrubbing time reuses solutions; the solve takes tens of milliseconds.
+ const key=[fill.toFixed(1),R,state.sigma.toFixed(4),state.contact,deltaRho.toFixed(1)].join('/');if(key===gasShapeKey)return gasShape;gasShapeKey=key;
+ if(fill<=0){gasRegion.visible=false;return gasShape={level:R,ring:0,apex:R,k0:0,laplacePa:0}}
+ const sol=solveBubble({R,V:cavityVolume*(+fill.toFixed(1))/100,gamma:state.sigma,theta:THREE.MathUtils.degToRad(state.contact),deltaRho});
+ if(!sol){const level=flatCapLevel(R,V);return gasShape={level,ring:Math.sqrt(Math.max(0,R*R-level*level)),apex:level,k0:0,laplacePa:0}}
+ // Lathe outline: wall arc from the top down to the contact ring, then the interface back to the axis.
+ const pts=[],wallAngle=Math.acos(THREE.MathUtils.clamp(sol.contactLevel/R,-1,1));
+ for(let i=0;i<=96;i++){const a=wallAngle*i/96;pts.push(new THREE.Vector2(R*Math.sin(a),R*Math.cos(a)))}
+ for(let i=sol.profile.length-2;i>=0;i--){const [x,z]=sol.profile[i];pts.push(new THREE.Vector2(Math.max(0,x),z))}
+ const old=gasRegion.geometry;gasRegion.geometry=new THREE.LatheGeometry(pts,128);old.dispose();
+ return gasShape={level:sol.contactLevel,ring:sol.contactRadius,apex:sol.apex,k0:sol.k0,laplacePa:sol.laplacePa,lc:sol.lc};
 }
 function updateModel(dt){const pitch=THREE.MathUtils.degToRad(state.posture),roll=THREE.MathUtils.degToRad(state.tilt);targetUp.set(Math.sin(roll)*Math.cos(pitch),Math.cos(roll)*Math.cos(pitch),-Math.sin(pitch)).normalize();if(!paused){velocity.addScaledVector(targetUp.clone().sub(bubbleUp),dt*5.5);velocity.multiplyScalar(Math.exp(-3.4*dt));bubbleUp.addScaledVector(velocity,dt).normalize()}
- const fill=estimatedFill(),cavityR=10.55,cavityV=4/3*Math.PI*Math.pow(cavityR,3),V=cavityV*fill/100,r=Math.cbrt(V*3/(4*Math.PI)),hasGas=fill>=disappearanceFill,hasInterface=hasGas&&fill<100;const bo=hasGas?1000*9.81*Math.pow(r/1000,2)/state.sigma:0,shape=hasInterface?updateGasRegion(V,cavityR,fill):{level:hasGas?-cavityR:cavityR,ring:0,center:0,radius:0},meniscusLevel=shape.level,capRingR=shape.ring;
+ const fill=estimatedFill(),cavityR=cavityRadius,cavityV=cavityVolume,V=cavityV*fill/100,r=Math.cbrt(V*3/(4*Math.PI)),hasGas=fill>=disappearanceFill,hasInterface=hasGas&&fill<99.9,gasDensityNow=gasDensity(state.gas,state.concentration),deltaRho=1005-gasDensityNow;const bo=hasGas?deltaRho*9.81*Math.pow(r/1000,2)/state.sigma:0,shape=hasInterface?updateGasRegion(V,cavityR,fill,deltaRho):{level:hasGas?-cavityR:cavityR,ring:0,apex:hasGas?-cavityR:cavityR,k0:0,laplacePa:0},meniscusLevel=shape.level,capRingR=shape.ring;
  updateKineticsReadout(fill);
  // Every partial fill is the same wall-plus-interface topology, revolved around buoyancy.
- bubble.position.set(0,0,0);bubble.scale.setScalar(cavityR);bubble.quaternion.identity();bubble.visible=fill>=100;compactBubble.visible=false;gasRegion.visible=hasInterface;gasRegion.position.set(0,0,0);gasRegion.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),bubbleUp);
+ bubble.position.set(0,0,0);bubble.scale.setScalar(cavityR);bubble.quaternion.identity();bubble.visible=fill>=99.9;compactBubble.visible=false;gasRegion.visible=hasInterface;gasRegion.position.set(0,0,0);gasRegion.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),bubbleUp);
  interfaceRing.scale.setScalar(Math.max(.01,capRingR));interfaceRing.position.copy(bubbleUp).multiplyScalar(meniscusLevel);interfaceRing.quaternion.setFromUnitVectors(new THREE.Vector3(0,0,1),bubbleUp);interfaceRing.visible=hasInterface;interfaceRing.material.opacity=1;meniscus.visible=false;
- const coverage=hasGas?(1-meniscusLevel/cavityR)*50:0,interfaceRadiusM=hasInterface?shape.radius/1000:Infinity,laplace=hasInterface?2*state.sigma/interfaceRadiusM:0,laplaceMmHg=laplace/133.322,gasPressure=state.iop+laplaceMmHg;
+ // Wetted retina is the spherical zone above the contact ring. Gas pressure exceeds the liquid at the interface apex by γ·k0.
+ const coverage=hasGas?(1-meniscusLevel/cavityR)*50:0,laplace=hasInterface?shape.laplacePa:0,laplaceMmHg=laplace/133.322,gasPressure=state.iop+laplaceMmHg,apexLevel=shape.apex;
  // The gas contacts the lens when its cap reaches the lens ellipsoid's support point along buoyancy.
  const lensRadii=new THREE.Vector3(4.3,4.3,4.3*.72),lensCenter=lens.position.clone(),supportDenom=Math.sqrt((lensRadii.x*bubbleUp.x)**2+(lensRadii.y*bubbleUp.y)**2+(lensRadii.z*bubbleUp.z)**2)||1,lensSupport=new THREE.Vector3(lensRadii.x*lensRadii.x*bubbleUp.x,lensRadii.y*lensRadii.y*bubbleUp.y,lensRadii.z*lensRadii.z*bubbleUp.z).divideScalar(supportDenom).add(lensCenter),lensContact=hasInterface&&lensSupport.dot(bubbleUp)>=meniscusLevel;
  lensContactMarker.visible=lensContact&&!fundusView;if(lensContact)lensContactMarker.position.copy(lensSupport);lens.material.emissive.setHex(lensContact?0x6b2e00:0x000000);lens.material.emissiveIntensity=lensContact?1.35:0;
  // Local tamponade force is differential pressure multiplied by a defined 1 mm² patch.
- const gasDensity=gases[state.gas].density,deltaRho=1000-gasDensity,mirror=state.laterality==='Right'?-1:1,fovea=retinalPoint(1.7*mirror,-.15),foveaNormal=fovea.clone().normalize();foveaMarker.position.copy(fovea);
+ const mirror=state.laterality==='Right'?-1:1,fovea=retinalPoint(1.7*mirror,-.15),foveaNormal=fovea.clone().normalize();foveaMarker.position.copy(fovea);
  // Compare polar angles, not raw radii: anatomy and fluid cavity use different shells.
  const foveaCavityAxial=cavityR*foveaNormal.dot(bubbleUp),contactTolerance=.02,foveaCovered=fill>=100||(hasInterface&&foveaCavityAxial>=meniscusLevel-contactTolerance);
- const hydrostaticHeadM=Math.max(0,(foveaCavityAxial-meniscusLevel)/1000),hydrostatic=deltaRho*9.81*hydrostaticHeadM,localPressure=foveaCovered?laplace+hydrostatic:0,fovealForce=localPressure*1e-6;
- const apexHeadM=hasInterface?(cavityR-meniscusLevel)/1000:0,apexPressure=hasInterface?laplace+deltaRho*9.81*apexHeadM:0,apexForce=apexPressure*1e-6;
+ const hydrostaticHeadM=Math.max(0,(foveaCavityAxial-apexLevel)/1000),hydrostatic=deltaRho*9.81*hydrostaticHeadM,localPressure=foveaCovered?laplace+hydrostatic:0,fovealForce=localPressure*1e-6;
+ const apexHeadM=hasInterface?(cavityR-apexLevel)/1000:0,apexPressure=hasInterface?laplace+deltaRho*9.81*apexHeadM:0,apexForce=apexPressure*1e-6;
  const apex=bubbleUp.clone().multiplyScalar(cavityR);apexArrow.visible=hasGas;apexForceLabel.visible=hasGas;apexArrow.position.copy(apex);apexArrow.setDirection(bubbleUp);apexArrow.setLength(2+Math.min(3,apexPressure/80),.85,.48);apexForceLabel.position.copy(apex).addScaledVector(bubbleUp,3.5);
  foveaArrow.visible=foveaCovered;foveaForceLabel.visible=foveaCovered;foveaArrow.position.copy(fovea);foveaArrow.setDirection(foveaNormal);foveaArrow.setLength(2+Math.min(3,localPressure/80),.8,.45);foveaForceLabel.position.copy(fovea).addScaledVector(foveaNormal,3.1);
- document.querySelector('#vol').textContent=(V/1000).toFixed(2)+' mL ('+state.fill+'%)';document.querySelector('#iopReadout').textContent=state.iop.toFixed(0)+' mmHg';document.querySelector('#laplace').textContent=laplace.toFixed(1)+' Pa / '+laplaceMmHg.toFixed(3)+' mmHg';document.querySelector('#gasPressure').textContent=gasPressure.toFixed(2)+' mmHg';document.querySelector('#apexLoad').textContent=hasInterface?(apexForce*1e6).toFixed(1)+' µN / 1 mm²':'—';document.querySelector('#fovealLoad').textContent=foveaCovered?(fovealForce*1e6).toFixed(1)+' µN / 1 mm²':'No gas contact';document.querySelector('#bond').textContent=bo.toFixed(2);document.querySelector('#contactArea').textContent=coverage.toFixed(0)+'% globe';document.querySelector('#coverage').style.width=coverage+'%';document.querySelector('#orient').textContent=`Bubble buoyancy: ${targetUp.x.toFixed(2)}, ${targetUp.y.toFixed(2)}, ${targetUp.z.toFixed(2)}`;
+ document.querySelector('#arc').textContent=hasGas?(fill>=99.9?'360°':arcDegrees(cavityR,meniscusLevel).toFixed(0)+'°'):'—';document.querySelector('#arcFlat').textContent=hasGas?(fill>=99.9?'360°':arcDegrees(cavityR,flatCapLevel(cavityR,V)).toFixed(0)+'°'):'—';document.querySelector('#iopReadout').textContent=state.iop.toFixed(0)+' mmHg';document.querySelector('#laplace').textContent=laplace.toFixed(1)+' Pa / '+laplaceMmHg.toFixed(3)+' mmHg';document.querySelector('#gasPressure').textContent=gasPressure.toFixed(2)+' mmHg';document.querySelector('#apexLoad').textContent=hasInterface?(apexForce*1e6).toFixed(1)+' µN / 1 mm²':'—';document.querySelector('#fovealLoad').textContent=foveaCovered?(fovealForce*1e6).toFixed(1)+' µN / 1 mm²':'No gas contact';document.querySelector('#bond').textContent=bo.toFixed(2)+(shape.lc?' (lc '+shape.lc.toFixed(1)+' mm)':'');document.querySelector('#contactArea').textContent=coverage.toFixed(0)+'% globe';document.querySelector('#coverage').style.width=coverage+'%';document.querySelector('#orient').textContent=`Bubble buoyancy: ${targetUp.x.toFixed(2)}, ${targetUp.y.toFixed(2)}, ${targetUp.z.toFixed(2)}`;
 }
 function setLaterality(side){state.laterality=side;const mirror=side==='Right'?-1:1;disc.position.x=-1.8*mirror;opticCup.position.x=-1.8*mirror;nerve.position.x=-1.8*mirror;vesselGroup.scale.x=mirror}
 function setFundusView(enabled){fundusView=enabled;document.querySelector('.viewport').classList.toggle('fundus-view',enabled);document.querySelector('#fundus').classList.toggle('active',enabled);if(enabled){camera.position.set(0,0,5.7);camera.fov=62;controls.target.set(0,0,-11.3);controls.enableRotate=false;controls.enablePan=false;labels.visible=false;sclera.visible=false;cornea.visible=false;iris.visible=false;lens.visible=false;parsPlana.visible=false;vitreousBase.visible=false;ora.visible=false;nerve.visible=false}else{camera.position.set(31,15,30);camera.fov=34;controls.target.set(0,0,0);controls.enableRotate=true;controls.enablePan=true;labels.visible=state.labels;sclera.visible=true;cornea.visible=true;iris.visible=true;lens.visible=true;parsPlana.visible=true;vitreousBase.visible=true;ora.visible=true;nerve.visible=true}camera.updateProjectionMatrix();controls.update()}
 function updateConcentrationControl(reset=false){
- const gas=gases[state.gas],select=document.querySelector('#concentration'),field=document.querySelector('#concentrationField');
- if(reset)state.concentration=gas.defaultConcentration;
- const options=gas.halfLives.filter(([value])=>state.gas==='Air'||value>0);
- select.innerHTML=options.map(([value])=>`<option value="${value}" ${value===state.concentration?'selected':''}>${value===100?'100% (pure)':value+'%'}</option>`).join('');
- field.hidden=state.gas==='Air';document.querySelector('#concentrationVal').textContent=state.concentration===100?'Pure':state.concentration+'%';
+ const gas=GASES[state.gas],select=document.querySelector('#concentration'),field=document.querySelector('#concentrationField');
+ if(reset||!gas.options.some(o=>o.c===state.concentration))state.concentration=(gas.options.find(o=>!o.pure&&o.c>=(gas.isoexpansile??0))??gas.options[0]).c;
+ select.innerHTML=gas.options.map(o=>`<option value="${o.c}" ${o.c===state.concentration?'selected':''}>${o.pure?'100% (pure)':o.c+'%'+(o.c===gas.isoexpansile?' (isoexpansile)':'')}</option>`).join('');
+ field.hidden=state.gas==='Air';document.querySelector('#concentrationVal').textContent=isPureGas()?'Pure':state.concentration+'%';
  document.querySelector('#fillLabel').textContent=isPureGas()?'Injected gas fill':'Current gas fill';
+ // Each gas and concentration starts from its published clinical duration; the user can then change it.
+ state.durationDays=gasOption(state.gas,state.concentration).durationDays;const d=document.querySelector('#durationDays');d.value=state.durationDays;document.querySelector('#durationDaysVal').textContent=state.durationDays+' days';
 }
 function bind(){document.querySelectorAll('input[type=range]').forEach(el=>el.addEventListener('input',()=>{state[el.id]=+el.value/+el.dataset.scale;document.querySelector('#'+el.id+'Val').textContent=`${+el.value} ${el.dataset.unit}`;if(el.id==='tearClock'||el.id==='tearAnterior')updateTear()}));document.querySelector('#gas').onchange=e=>state.gas=e.target.value;document.querySelector('#laterality').onchange=e=>setLaterality(e.target.value);document.querySelector('#preset').onchange=e=>{const [p,r]=e.target.value.split(',').map(Number);['posture','tilt'].forEach((id,i)=>{state[id]=[p,r][i];const el=document.querySelector('#'+id);el.value=state[id];document.querySelector('#'+id+'Val').textContent=state[id]+' °'})};['labels','vessels','section','tearEnabled'].forEach(id=>document.querySelector('#'+id).onclick=e=>{state[id]=!state[id];e.currentTarget.classList.toggle('on',state[id]);labels.visible=state.labels&&!fundusView;vesselGroup.visible=state.vessels;if(id==='tearEnabled')updateTear();if(id==='section'){sclera.material.clippingPlanes=state.section?[new THREE.Plane(new THREE.Vector3(-1,0,0),0)]:[];renderer.localClippingEnabled=true}});document.querySelector('#opacity').addEventListener('input',e=>sclera.material.opacity=+e.target.value/100);document.querySelector('#bubbleOpacity').addEventListener('input',e=>{const opacity=+e.target.value/100;bubbleMat.opacity=opacity;compactBubble.material.opacity=opacity;meniscus.material.opacity=opacity});document.querySelector('#fundus').onclick=()=>setFundusView(!fundusView);document.querySelector('#reset').onclick=()=>setFundusView(false);document.querySelector('#pause').onclick=e=>{paused=!paused;e.currentTarget.textContent=paused?'▶':'Ⅱ'}}bind();setLaterality(state.laterality);updateTear();
 updateConcentrationControl();
 document.querySelector('#gas').onchange=e=>{state.gas=e.target.value;updateConcentrationControl(true)};
 document.querySelector('#concentration').onchange=e=>{state.concentration=+e.target.value;updateConcentrationControl()};
+document.querySelector('#lens').onchange=e=>{state.lens=e.target.value};
 document.querySelector('#timelineReset').onclick=()=>{state.elapsedDays=0;const el=document.querySelector('#elapsedDays');el.value=0;document.querySelector('#elapsedDaysVal').textContent='0 days'};
 for(const id of ['tearClock','tearAnterior'])document.querySelector('#'+id).addEventListener('input',()=>{state.tears[state.activeTear][id==='tearClock'?'clock':'anterior']=state[id];updateTears()});
 document.querySelector('#addTear').onclick=()=>{const source=state.tears[state.activeTear];state.tears.push({clock:source.clock===12?1:Math.min(12,source.clock+1),anterior:source.anterior});state.tearEnabled=true;document.querySelector('#tearEnabled').classList.add('on');selectTear(state.tears.length-1)};
